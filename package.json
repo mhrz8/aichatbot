@@ -1,0 +1,43 @@
+{
+  "name": "tw-aichat",
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.0",
+  "main": "index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "build": "rimraf dist && esbuild src/index.ts --bundle --platform=node --outfile=dist/index.js --format=cjs --sourcemap",
+    "build:lambda": "rimraf lambda && esbuild src/lambda.ts --bundle --minify --sourcemap --platform=node --target=es2020 --outfile=lambda/index.js && cp lambda-runner.sh lambda/run.sh",
+    "zip:lambda": "rimraf lambda.zip && cd lambda && zip -r -9 ../lambda.zip ./* && cd ..",
+    "start": "node dist/index.js",
+    "dev": "tsx --watch src/index.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@aws-sdk/client-bedrock": "^3.888.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.888.0",
+    "@modelcontextprotocol/sdk": "^1.18.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "@stylistic/eslint-plugin": "^5.3.1",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.4.0",
+    "@typescript-eslint/eslint-plugin": "^8.43.0",
+    "@typescript-eslint/parser": "^8.43.0",
+    "esbuild": "^0.25.9",
+    "eslint": "^9.35.0",
+    "eslint-plugin-perfectionist": "^4.15.0",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
