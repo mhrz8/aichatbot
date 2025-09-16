@@ -35,16 +35,11 @@ export function createExpressApp(): express.Express {
   registerMiddlewares(app);
 
   app.get('/health', async (req, res) => {
-    const toolsMap = await mcpManager.getAvailableTools();
-
-    for (const [serverId, tools] of toolsMap) {
-      for (const tool of tools) {
-        console.log(tool.inputSchema);
-      }
-    }
+    const { allServerTools } = await mcpManager.getAvailableTools();
 
     res.json({
       status: 'healthy',
+      tools: allServerTools,
     });
   });
 

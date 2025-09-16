@@ -1,6 +1,10 @@
 export type MCPServerId = string;
 export type MCPToolName = string;
 
+export type ToolDictionary = Map<MCPToolName, {
+  serverId: MCPServerId
+}>;
+
 export type MCPServer = {
   id: MCPServerId;
   name: string;

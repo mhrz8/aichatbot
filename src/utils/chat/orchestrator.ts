@@ -1,10 +1,8 @@
 import { ContentBlock, Message } from '@aws-sdk/client-bedrock-runtime';
 
-import { FlattenMCPTools, FullMCPToolName } from '../bedrock/types.js';
-import { MCPServerId, MCPTool } from '../mcp-manager/types.js';
+import { ToolDictionary } from '../mcp-manager/types.js';
 import { MCPManager } from '../mcp-manager/manager.js';
 import { BedrockManager } from '../bedrock/manager.js';
-import { ToolDictionary } from './types.js';
 
 export class ChatOrchestrator {
   constructor(
@@ -16,81 +14,74 @@ export class ChatOrchestrator {
     modelId: string,
     sessionId: string,
     rawMessages: Message[],
-  ) {
-    let messages = structuredClone(rawMessages);
+  ): Promise<{
+    response: ContentBlock[];
+    messages: Message[];
+    toolsUsed: string[];
+    mcpServersUsed: string[];
+  }> {
+    const messages = structuredClone(rawMessages);
     const {
       allServerTools,
       serverToolsMap,
       toolDictionary,
-    } = await this.getMCPTools();
+    } = await this.mcpManager.getAvailableTools();
 
     const systemPrompt = this.buildToolSystemPrompt(serverToolsMap);
 
-    console.log('systemPrompt', systemPrompt);
-
-    const response = await this.bedrockManager.generateResponse(
+    const toolsUsed: string[] = [];
+    const mcpServersUsed: string[] = [];
+    let response = await this.bedrockManager.generateResponse(
       modelId,
       messages,
       allServerTools,
       systemPrompt,
     );
 
-    if (response.stopReason === 'tool_use') {
+    while (response.stopReason === 'tool_use') {
       const toolRequests = response.output?.message?.content?.filter((c) => c.toolUse) ?? [];
+
+      if (toolRequests.length === 0) {
+        break;
+      }
+
       const {
-        toolsUsed,
-        mcpServersUsed,
+        toolsUsed: currentToolsUsed,
+        mcpServersUsed: currentMcpServersUsed,
         additionalMessages,
       } = await this.processToolResponse(toolRequests, toolDictionary);
 
-      messages = [
-        ...messages,
-        ...additionalMessages,
-      ];
+      toolsUsed.push(...currentToolsUsed);
+      currentMcpServersUsed.forEach((serverId) => {
+        if (!mcpServersUsed.includes(serverId)) {
+          mcpServersUsed.push(serverId);
+        }
+      });
 
-      const finalResponse = await this.bedrockManager.generateResponse(
+      messages.push({
+        role: 'assistant',
+        content: response.output?.message?.content ?? [],
+      });
+      messages.push(...additionalMessages);
+
+      response = await this.bedrockManager.generateResponse(
         modelId,
         messages,
+        allServerTools,
+        systemPrompt,
       );
-
-      return {
-        response: finalResponse.output?.message?.content?.[0]?.text ?? 'No response',
-        toolsUsed,
-        mcpServersUsed,
-      };
     }
 
-    return {
-      response: response.output?.message?.content?.[0]?.text ?? 'No response',
-      toolsUsed: [],
-      mcpServersUsed: [],
-    };
-  }
-
-  private async getMCPTools(): Promise<{
-    allServerTools: FlattenMCPTools,
-    serverToolsMap: Map<MCPServerId, MCPTool[]>,
-    toolDictionary: ToolDictionary,
-  }> {
-    const allServerTools: FlattenMCPTools = [];
-    const serverToolsMap = await this.mcpManager.getAvailableTools();
-    const toolDictionary: ToolDictionary = new Map<FullMCPToolName, { serverId: MCPServerId }>();
-
-    for (const [serverId, tools] of serverToolsMap) {
-      for (const tool of tools) {
-        allServerTools.push({
-          name: `${serverId}__${tool.name}`,
-          description: `[${serverId}] ${tool.description}`,
-          inputSchema: tool.inputSchema,
-        });
-        toolDictionary.set(`${serverId}__${tool.name}`, { serverId });
-      }
-    }
+    messages.push({
+      role: 'assistant',
+      content: response.output?.message?.content ?? [],
+    });
 
     return {
-      allServerTools,
-      serverToolsMap,
-      toolDictionary,
+      response: response.output?.message?.content ?? [],
+      messages,
+      toolsUsed,
+      mcpServersUsed,
     };
   }
 
@@ -105,49 +96,64 @@ export class ChatOrchestrator {
       }
 
       const fullToolName = toolUse.toolUse.name;
-
       const tool = toolDictionary.get(fullToolName);
+
       if (!tool) {
+        console.warn(`Tool ${fullToolName} not found in dictionary`);
+        additionalMessages.push({
+          role: 'user',
+          content: [{
+            text: `Error: Tool ${fullToolName} not found`,
+          }],
+        });
         continue;
       }
 
       const { serverId } = tool;
       const actualToolName = fullToolName.replace(`${serverId}__`, '');
 
-      if (serverId) {
-        try {
-          const toolResult = await this.mcpManager.executeCallTool(
-            serverId,
-            actualToolName,
-            toolUse.toolUse.input,
-          );
+      try {
+        console.info(`Executing tool: ${actualToolName} on server: ${serverId}`);
 
-          console.log('toolResult', toolResult);
+        const toolResult = await this.mcpManager.executeCallTool(
+          serverId,
+          actualToolName,
+          toolUse.toolUse.input,
+        );
 
-          toolsUsed.push(actualToolName);
-          if (!mcpServersUsed.includes(serverId)) {
-            mcpServersUsed.push(serverId);
-          }
+        console.info(`Successfully executed tool: ${actualToolName} on server: ${serverId}`);
 
-          additionalMessages.push({
-            role: 'assistant',
-            content: [
-              {
-                text: `Used tool ${actualToolName}`,
-              },
-            ],
-          });
-          additionalMessages.push({
-            role: 'user',
-            content: [
-              {
-                text: `Tool result: ${JSON.stringify(toolResult.content)}`,
-              },
-            ],
-          });
-        } catch (error) {
-          console.error(`Tool execution failed:`, error);
+        toolsUsed.push(actualToolName);
+        if (!mcpServersUsed.includes(serverId)) {
+          mcpServersUsed.push(serverId);
         }
+
+        additionalMessages.push({
+          role: 'user',
+          content: [{
+            toolResult: {
+              toolUseId: toolUse.toolUse.toolUseId,
+              content: [{
+                text: this.formatToolResult(toolResult.content),
+              }],
+            },
+          }],
+        });
+      } catch (error) {
+        console.error(`Tool execution failed for ${actualToolName}:`, error);
+
+        additionalMessages.push({
+          role: 'user',
+          content: [{
+            toolResult: {
+              toolUseId: toolUse.toolUse.toolUseId,
+              content: [{
+                text: `Error executing ${actualToolName}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              }],
+              status: 'error',
+            },
+          }],
+        });
       }
     }
 
@@ -156,6 +162,23 @@ export class ChatOrchestrator {
       mcpServersUsed,
       additionalMessages,
     };
+  }
+
+  private formatToolResult(content: any): string {
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    if (Array.isArray(content)) {
+      return content.map((item) => {
+        if (typeof item === 'object' && item.text) {
+          return item.text;
+        }
+        return JSON.stringify(item);
+      }).join('\n');
+    }
+
+    return JSON.stringify(content, null, 2);
   }
 
   private buildToolSystemPrompt(toolsByServer: Map<string, any[]>): string {
@@ -172,6 +195,9 @@ export class ChatOrchestrator {
     }
 
     prompt += "\nWhen using tools, consider which MCP server would be most appropriate for the user's request.";
+    prompt += '\nYou can use multiple tools in sequence to complete complex tasks. Each tool result will be provided to you, and you can then decide if additional tools are needed.';
+    prompt += '\nOnly stop using tools when you have all the information needed to provide a complete response to the user.';
+
     return prompt;
   }
 }

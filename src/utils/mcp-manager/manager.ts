@@ -1,7 +1,7 @@
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client as MCPClient } from '@modelcontextprotocol/sdk/client/index.js';
 
-import { MCPServerId, MCPServer, MCPTool } from './types.js';
+import { ToolDictionary, MCPServerId, MCPToolName, MCPServer, MCPTool } from './types.js';
 
 export class MCPManager {
   private clients: Map<string, MCPClient> = new Map();
@@ -32,7 +32,7 @@ export class MCPManager {
     return this.servers.get(serverId);
   }
 
-  async getAvailableTools(): Promise<Map<MCPServerId, MCPTool[]>> {
+  async listTools(): Promise<Map<MCPServerId, MCPTool[]>> {
     const toolsByServer = new Map<MCPServerId, MCPTool[]>();
 
     for (const [serverId, client] of this.clients) {
@@ -46,6 +46,33 @@ export class MCPManager {
     }
 
     return toolsByServer;
+  }
+
+  async getAvailableTools(): Promise<{
+    allServerTools: MCPTool[],
+    serverToolsMap: Map<MCPServerId, MCPTool[]>,
+    toolDictionary: ToolDictionary,
+  }> {
+    const allServerTools: MCPTool[] = [];
+    const serverToolsMap = await this.listTools();
+    const toolDictionary: ToolDictionary = new Map<MCPToolName, { serverId: MCPServerId }>();
+
+    for (const [serverId, tools] of serverToolsMap) {
+      for (const tool of tools) {
+        allServerTools.push({
+          name: `${serverId}__${tool.name}`,
+          description: `[${serverId}] ${tool.description}`,
+          inputSchema: tool.inputSchema,
+        });
+        toolDictionary.set(`${serverId}__${tool.name}`, { serverId });
+      }
+    }
+
+    return {
+      allServerTools,
+      serverToolsMap,
+      toolDictionary,
+    };
   }
 
   async executeCallTool(serverId: string, toolName: string, args: any): Promise<any> {
