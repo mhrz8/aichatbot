@@ -61,6 +61,12 @@ export function createExpressApp(): express.Express {
       return;
     }
 
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Transfer-Encoding': 'chunked',
+      Connection: 'keep-alive',
+    });
+
     const messageHistories: Message[] = [
       ...histories,
       {
@@ -78,15 +84,41 @@ export function createExpressApp(): express.Express {
       bedrockManager,
     );
 
-    const response = await chatOrchestrator.processUserMessage(
-      model,
-      randomUUID(),
-      messageHistories,
-    );
-
-    res.json({
-      response,
+    chatOrchestrator.on('thinking', () => {
+      res.write(`data: ${JSON.stringify({
+        type: 'thinking',
+        message: `Thinking...`,
+      })}\n\n`);
     });
+
+    chatOrchestrator.on('response', ({ content }) => {
+      const textContent = content.find((c) => c.text)?.text;
+      if (textContent) {
+        res.write(`data: ${JSON.stringify({
+          content: textContent,
+        })}\n\n`);
+      }
+    });
+
+    req.on('close', () => {
+      chatOrchestrator.removeAllListeners();
+    });
+
+    try {
+      await chatOrchestrator.processUserMessage(
+        model,
+        randomUUID(),
+        messageHistories,
+      );
+    } catch (error) {
+      console.error('Chat orchestrator error:', error);
+      res.write(`data: ${JSON.stringify({
+        type: 'error',
+        message: 'Currently we experiencing turbulance in our system, kindly to try again later',
+      })}\n\n`);
+    } finally {
+      res.end();
+    }
   });
 
   app.get('/stream', async (req, res) => {

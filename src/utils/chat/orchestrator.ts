@@ -1,14 +1,21 @@
+import { EventEmitter } from 'node:stream';
+
 import { ContentBlock, Message } from '@aws-sdk/client-bedrock-runtime';
 
 import { ToolDictionary } from '../mcp-manager/types.js';
 import { MCPManager } from '../mcp-manager/manager.js';
 import { BedrockManager } from '../bedrock/manager.js';
 
-export class ChatOrchestrator {
+export class ChatOrchestrator extends EventEmitter<{
+  thinking: [];
+  response: [{ content: ContentBlock[] }];
+}> {
   constructor(
     private mcpManager: MCPManager,
     private bedrockManager: BedrockManager,
-  ) {}
+  ) {
+    super();
+  }
 
   async processUserMessage(
     modelId: string,
@@ -20,6 +27,17 @@ export class ChatOrchestrator {
     toolsUsed: string[];
     mcpServersUsed: string[];
   }> {
+    if (!rawMessages.length) {
+      const emptyResult = {
+        response: [],
+        messages: [],
+        toolsUsed: [],
+        mcpServersUsed: [],
+      };
+      this.emit('response', { content: [] });
+      return emptyResult;
+    }
+
     const messages = structuredClone(rawMessages);
     const {
       allServerTools,
@@ -31,12 +49,15 @@ export class ChatOrchestrator {
 
     const toolsUsed: string[] = [];
     const mcpServersUsed: string[] = [];
+
+    this.emit('thinking');
     let response = await this.bedrockManager.generateResponse(
       modelId,
       messages,
       allServerTools,
       systemPrompt,
     );
+    this.emit('response', { content: response.output?.message?.content ?? [] });
 
     while (response.stopReason === 'tool_use') {
       const toolRequests = response.output?.message?.content?.filter((c) => c.toolUse) ?? [];
@@ -64,12 +85,14 @@ export class ChatOrchestrator {
       });
       messages.push(...additionalMessages);
 
+      this.emit('thinking');
       response = await this.bedrockManager.generateResponse(
         modelId,
         messages,
         allServerTools,
         systemPrompt,
       );
+      this.emit('response', { content: response.output?.message?.content ?? [] });
     }
 
     messages.push({
@@ -77,12 +100,14 @@ export class ChatOrchestrator {
       content: response.output?.message?.content ?? [],
     });
 
-    return {
+    const result = {
       response: response.output?.message?.content ?? [],
       messages,
       toolsUsed,
       mcpServersUsed,
     };
+
+    return result;
   }
 
   private async processToolResponse(toolRequests: ContentBlock[], toolDictionary: ToolDictionary) {
@@ -90,12 +115,12 @@ export class ChatOrchestrator {
     const mcpServersUsed: string[] = [];
     const additionalMessages: Message[] = [];
 
-    for (const toolUse of toolRequests) {
-      if (!toolUse.toolUse || !toolUse.toolUse.name) {
+    for (const toolRequest of toolRequests) {
+      if (!toolRequest.toolUse || !toolRequest.toolUse.name) {
         continue;
       }
 
-      const fullToolName = toolUse.toolUse.name;
+      const fullToolName = toolRequest.toolUse.name;
       const tool = toolDictionary.get(fullToolName);
 
       if (!tool) {
@@ -118,7 +143,7 @@ export class ChatOrchestrator {
         const toolResult = await this.mcpManager.executeCallTool(
           serverId,
           actualToolName,
-          toolUse.toolUse.input,
+          toolRequest.toolUse.input,
         );
 
         console.info(`Successfully executed tool: ${actualToolName} on server: ${serverId}`);
@@ -132,7 +157,7 @@ export class ChatOrchestrator {
           role: 'user',
           content: [{
             toolResult: {
-              toolUseId: toolUse.toolUse.toolUseId,
+              toolUseId: toolRequest.toolUse.toolUseId,
               content: [{
                 text: this.formatToolResult(toolResult.content),
               }],
@@ -146,7 +171,7 @@ export class ChatOrchestrator {
           role: 'user',
           content: [{
             toolResult: {
-              toolUseId: toolUse.toolUse.toolUseId,
+              toolUseId: toolRequest.toolUse.toolUseId,
               content: [{
                 text: `Error executing ${actualToolName}: ${error instanceof Error ? error.message : 'Unknown error'}`,
               }],

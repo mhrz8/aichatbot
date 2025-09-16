@@ -1,7 +1,8 @@
 import { ConverseCommandOutput, BedrockRuntimeClient, ConverseCommandInput, ConverseCommand, Message, Tool } from '@aws-sdk/client-bedrock-runtime';
 import { ListFoundationModelsCommand, FoundationModelSummary, BedrockClient } from '@aws-sdk/client-bedrock';
 
-import { FlattenMCPTools } from './types.js';
+import { safeJSONStringify } from '../../helpers/json.js';
+import { MCPTool } from '../mcp-manager/types.js';
 import { AWS_REGION } from '../config.js';
 
 export class BedrockManager {
@@ -38,9 +39,16 @@ export class BedrockManager {
   async generateResponse(
     modelId: string,
     messages: Message[],
-    tools?: FlattenMCPTools,
+    tools?: MCPTool[],
     systemPrompt?: string,
   ): Promise<ConverseCommandOutput> {
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage) {
+      throw new Error('Expecting messages to be a non-empty array');
+    }
+
+    console.info(`Generating response for message from '${lastMessage.role}': ${safeJSONStringify(lastMessage.content)}`);
+
     const input: ConverseCommandInput = {
       modelId,
       messages,
@@ -65,13 +73,16 @@ export class BedrockManager {
       };
     }
 
-
     if (systemPrompt) {
       input.system = [{ text: systemPrompt }];
     }
 
     const command = new ConverseCommand(input);
     const response = await this.client.send(command);
+
+    if (response.output?.message) {
+      console.info(`Response successfully generated for message from '${response.output.message.role}': ${safeJSONStringify(response.output.message.content)}`);
+    }
     return response;
   }
 
