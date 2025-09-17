@@ -33,7 +33,7 @@ export function createExpressApp(): express.Express {
     mcpManager
       .connectServer(mcpServer)
       .then(() => console.info(`Successfully connected to MCP Server: '${mcpServer.name}'`))
-      .catch((err) => console.error('Failed while connecting to MCP Server', err.message));
+      .catch((err) => console.error(`Failed while connecting to MCP Server '${mcpServer.name}': ${err.message}`));
   }));
 
   registerMiddlewares(app);
@@ -51,7 +51,7 @@ export function createExpressApp(): express.Express {
     req: express.Request<{}, {}, ChatRequestBody>,
     res: express.Response,
   ) {
-    const model = req.body.model ??  DEFAULT_MODEL;
+    const model = req.body.model ?? DEFAULT_MODEL;
     const message = req.body.query;
     const histories = req.body.histories;
 
@@ -61,11 +61,13 @@ export function createExpressApp(): express.Express {
 
     const bedrockManager = new BedrockManager(bedrock, bedrockClient);
 
-    const streaming = await bedrockManager.isResponseStreamingSupported(model).catch(() => {
-      stream('error', 'An error occurred while checking model details');
-      res.end();
-      return undefined;
-    });
+    const streaming = await bedrockManager
+      .isResponseStreamingSupported(model)
+      .catch(() => {
+        stream('error', 'An error occurred while checking model details');
+        res.end();
+        return undefined;
+      });
 
     if (typeof streaming === 'undefined') {
       return;

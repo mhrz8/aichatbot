@@ -8,10 +8,13 @@ export class MCPManager {
   private servers: Map<string, MCPServer> = new Map();
 
   async connectServer(mcpServer: MCPServer): Promise<void> {
+    await new Promise((res) => setTimeout(res, 5000));
     const mcpClients = new MCPClient({
       name: `${mcpServer.id}-client`,
       version: '1.0.0',
     });
+
+    console.info(`Connecting to MCP Server '${mcpServer.name}' (${mcpServer.remoteUrl})`);
 
     const transport = new StreamableHTTPClientTransport(new URL(mcpServer.remoteUrl));
 
