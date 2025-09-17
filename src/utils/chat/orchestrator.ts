@@ -1,14 +1,15 @@
 import { EventEmitter } from 'node:stream';
 
-import { ContentBlock, Message } from '@aws-sdk/client-bedrock-runtime';
+import { ConverseCommandOutput, ContentBlock, Message } from '@aws-sdk/client-bedrock-runtime';
 
-import { ToolDictionary } from '../mcp-manager/types.js';
+import { ToolDictionary, MCPTool } from '../mcp-manager/types.js';
 import { MCPManager } from '../mcp-manager/manager.js';
 import { BedrockManager } from '../bedrock/manager.js';
 
 export class ChatOrchestrator extends EventEmitter<{
   thinking: [];
-  response: [{ content: ContentBlock[] }];
+  stream: [{ text: string }];
+  done: [];
 }> {
   constructor(
     private mcpManager: MCPManager,
@@ -21,6 +22,7 @@ export class ChatOrchestrator extends EventEmitter<{
     modelId: string,
     sessionId: string,
     rawMessages: Message[],
+    streaming = false,
   ): Promise<{
     response: ContentBlock[];
     messages: Message[];
@@ -34,7 +36,7 @@ export class ChatOrchestrator extends EventEmitter<{
         toolsUsed: [],
         mcpServersUsed: [],
       };
-      this.emit('response', { content: [] });
+      this.emit('stream', { text: '' });
       return emptyResult;
     }
 
@@ -50,14 +52,13 @@ export class ChatOrchestrator extends EventEmitter<{
     const toolsUsed: string[] = [];
     const mcpServersUsed: string[] = [];
 
-    this.emit('thinking');
-    let response = await this.bedrockManager.generateResponse(
+    let response = await this.generateResponseWithMode(
+      streaming,
       modelId,
       messages,
       allServerTools,
       systemPrompt,
     );
-    this.emit('response', { content: response.output?.message?.content ?? [] });
 
     while (response.stopReason === 'tool_use') {
       const toolRequests = response.output?.message?.content?.filter((c) => c.toolUse) ?? [];
@@ -85,14 +86,13 @@ export class ChatOrchestrator extends EventEmitter<{
       });
       messages.push(...additionalMessages);
 
-      this.emit('thinking');
-      response = await this.bedrockManager.generateResponse(
+      response = await this.generateResponseWithMode(
+        streaming,
         modelId,
         messages,
         allServerTools,
         systemPrompt,
       );
-      this.emit('response', { content: response.output?.message?.content ?? [] });
     }
 
     messages.push({
@@ -107,10 +107,51 @@ export class ChatOrchestrator extends EventEmitter<{
       mcpServersUsed,
     };
 
+    this.emit('done');
+
     return result;
   }
 
-  private async processToolResponse(toolRequests: ContentBlock[], toolDictionary: ToolDictionary) {
+  private async generateResponseWithMode(
+    streaming: boolean,
+    modelId: string,
+    messages: Message[],
+    tools: MCPTool[],
+    systemPrompt: string,
+  ): Promise<ConverseCommandOutput> {
+    this.emit('thinking');
+
+    let response: ConverseCommandOutput;
+    if (streaming) {
+      response = await this.bedrockManager.generateStreamResponse(
+        modelId,
+        messages,
+        (chunk) => this.emit('stream', { text: chunk }),
+        tools,
+        systemPrompt,
+      );
+    } else {
+      response = await this.bedrockManager.generateResponse(
+        modelId,
+        messages,
+        tools,
+        systemPrompt,
+      );
+    }
+
+    const messageContent = response.output?.message?.content ?? [];
+    const textContent = messageContent.find((c) => c.text)?.text;
+    if (textContent) {
+      this.emit('stream', { text: textContent });
+    }
+
+    return response;
+  }
+
+  private async processToolResponse(
+    toolRequests: ContentBlock[],
+    toolDictionary: ToolDictionary,
+  ) {
     const toolsUsed: string[] = [];
     const mcpServersUsed: string[] = [];
     const additionalMessages: Message[] = [];

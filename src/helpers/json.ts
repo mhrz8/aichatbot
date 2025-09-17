@@ -1,4 +1,4 @@
-export function safeJSONStringify(obj: any, maxLength = 100) {
+export function safeJSONStringify(obj: any, maxLength = 500) {
   try {
     const str = JSON.stringify(obj);
     return str.length > maxLength ? str.slice(0, maxLength) + '... [truncated]' : str;
