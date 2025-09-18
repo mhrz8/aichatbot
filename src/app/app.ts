@@ -10,6 +10,7 @@ import { BedrockManager } from '../utils/bedrock/manager.js';
 import { DEFAULT_MODEL } from '../utils/bedrock/constant.js';
 import { MCPManager } from '../utils/mcp-manager/manager.js';
 import { mcpServers } from '../utils/mcp-manager/servers.js';
+import { PlaygroundHTML } from './playground.js';
 import { AWS_REGION } from '../utils/config.js';
 import { ChatRequestBody } from './types.js';
 
@@ -37,6 +38,14 @@ export function createExpressApp(): express.Express {
   }));
 
   registerMiddlewares(app);
+
+  app.get('/playground', (req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    res.send(PlaygroundHTML(
+      'AI Flight Booking Assistant - Playground',
+      'Testing with EventSource streaming',
+    ));
+  });
 
   app.get('/health', async (req, res) => {
     const { allServerTools } = await mcpManager.getAvailableTools();
@@ -76,6 +85,9 @@ export function createExpressApp(): express.Express {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Cache-Control',
     });
 
     const messageHistories: Message[] = [
@@ -108,7 +120,7 @@ export function createExpressApp(): express.Express {
       );
     } catch (error) {
       console.error('Chat orchestrator error:', error);
-      stream('error', 'Currently we experiencing turbulance in our system, kindly to try again later');
+      stream('error', 'Currently we experiencing turbulence in our system, kindly try again later');
     } finally {
       res.end();
     }
