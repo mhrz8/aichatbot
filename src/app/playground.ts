@@ -821,9 +821,9 @@ export function PlaygroundHTML(title: string, subtitle: string): string {
         
         <div class="chat-input">
             <div class="suggestions">
-                <button class="suggestion" onclick="sendSuggestion('I want to book a flight from JFK to LAX on March 15th for 1 person')">Book JFK → LAX</button>
-                <button class="suggestion" onclick="sendSuggestion('Search flights from San Francisco to Miami next Friday')">Search SF → Miami</button>
-                <button class="suggestion" onclick="sendSuggestion('I need a round trip ticket from Chicago to Boston')">Round trip CHI → BOS</button>
+                <button class="suggestion" onclick="sendSuggestion('I want to book a flight from KUL to SIN on Dec 25th 2025 for 1 person')">Book KUL → SIN</button>
+                <button class="suggestion" onclick="sendSuggestion('Search flights from Kuala Lumpur to Penang next Friday')">Search KL → Penang</button>
+                <button class="suggestion" onclick="sendSuggestion('I need a round trip ticket from Singapore to Jakarta')">Round trip SIN → CGK</button>
                 <button class="reset-button" onclick="resetChat()">Reset Chat</button>
             </div>
             <div class="input-group">
